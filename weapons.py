@@ -15,9 +15,9 @@ class weapons:
         self.bot = bot
         self.start_time = start_time
         self.last_buy_time = 0
-        self.buy_cooldown_min = 20
-        self.buy_cooldown_max = 45
-        self.skip_probability = 0.3
+        self.buy_cooldown_min = 7
+        self.buy_cooldown_max = 25
+        self.skip_probability = 0.2
         self.failed_attempts = 0
         self.max_retries = random.randint(2, 5)
         self.has_enough_shards = True

@@ -632,7 +632,7 @@ def loopie() -> None:
     exp_time = time()
     weapons_check = time()
     cycles_since_last_weapon = 0
-    max_cycles_before_weapon = random.randint(1, 4)
+    max_cycles_before_weapon = random.randint(1, 2)
     hunt_battle_time = time()
     hunt_battle_count = 0
     daily_done = False
@@ -715,7 +715,7 @@ def loopie() -> None:
                         weapons_check = now
                         cycles_since_last_weapon = 0  # Reset cycle
                         # Random cycle mới cho lần tiếp theo
-                        max_cycles_before_weapon = random.randint(1, 4)
+                        max_cycles_before_weapon = random.randint(1, 2)
                         
         except Exception as e:
             logger.error(f"Error in loopie: {str(e)}")
