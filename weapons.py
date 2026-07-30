@@ -174,5 +174,5 @@ class weapons:
         self.last_check = 0
         self.last_buy_time = 0
         self.failed_attempts = 0
-        self.max_retries = random.randint(2, 5)
+        self.max_retries = random.randint(5, 12)
         ui.slowPrinting(f"{self.at()}{color.okblue} [INFO] {color.reset} Weapon state reset")

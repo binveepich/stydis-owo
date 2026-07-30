@@ -16,6 +16,8 @@ from threading import Lock
 from requests import get
 import discum
 from discord_webhook import DiscordWebhook
+from threading import Thread
+from queue import Queue
 
 from menu import UI
 from color import color
@@ -43,7 +45,8 @@ last_cmd_time = {}
 CMD_COOLDOWN = {
     "hunt": 15,
     "battle": 15,
-    "pray": 120
+    "pray": 120,
+    "buy": 30 
 }
 errors = []
 # Check token
@@ -627,12 +630,45 @@ def othercommands(resp: object) -> None:
     except Exception as e:
         logger.error(f"othercommands error: {str(e)}")
 
+weapon_queue = Queue()
+is_buying_weapon = False
+
+def weapon_buy_worker():
+    """Luồng riêng để xử lý mua crate"""
+    global is_buying_weapon
+    while True:
+        try:
+            if not weapon_queue.empty() and not is_buying_weapon:
+                is_buying_weapon = True
+                cmd = weapon_queue.get()
+                
+                # Đợi bot rảnh (không có lệnh nào đang chạy)
+                with cmd_lock:
+                    # Delay an toàn sau lệnh cuối
+                    time_since_last = time() - last_global_cmd_time
+                    if time_since_last < 15:
+                        sleep(15 - time_since_last + random.uniform(2, 5))
+                    
+                    # Gửi lệnh mua
+                    Weapons.buy_one_crate()
+                
+                is_buying_weapon = False
+                weapon_queue.task_done()
+                
+            sleep(1)
+        except Exception as e:
+            logger.error(f"Weapon worker error: {str(e)}")
+            is_buying_weapon = False
+            sleep(5)
+
+weapon_thread = Thread(target=weapon_buy_worker, daemon=True)
+weapon_thread.start()
+
 def loopie() -> None:
     pray_time = time()
     exp_time = time()
-    weapons_check = time()
     cycles_since_last_weapon = 0
-    max_cycles_before_weapon = random.randint(1, 2)
+    max_cycles_before_weapon = random.randint(2, 4)  # Tăng lên 2-4 cycle
     hunt_battle_time = time()
     hunt_battle_count = 0
     daily_done = False
@@ -649,51 +685,57 @@ def loopie() -> None:
 
             now = time()
 
-            # Hunt & Battle: mỗi 10-30s
-            if now - hunt_battle_time > random.randint(20, 40):
-
+            # Hunt & Battle: mỗi 20-40s (tăng thời gian lên)
+            if now - hunt_battle_time > random.randint(25, 45):
                 if not client.stopped:
                     send_owo_cmd("hunt")
-
                     sleep(random.randint(6, 14))
-
                     send_owo_cmd("battle")
-
+                    
                     hunt_battle_count += 1
-                    cycles_since_last_weapon += 1  # ✅ Thêm dòng này
+                    cycles_since_last_weapon += 1
                     hunt_battle_time = now
 
-            # Daily: sau 2 lần hunt & battle đầu, chỉ 1 lần
+            # Daily: sau 2 lần hunt & battle
             if not daily_done and hunt_battle_count >= 2 and client.daily == "YES" and not client.stopped:
                 daily()
                 daily_done = True
-                logger.info("Daily command sent after 2 hunt & battle cycles")
 
-            # Pray: mỗi  100 - 300s
-            if now - pray_time > random.randint(300, 600) and not client.stopped:
+            # Pray: 200-400s
+            if now - pray_time > random.randint(200, 400) and not client.stopped:
                 owopray()
                 pray_time = now
 
-            # EXP giữ nguyên
-            if now - exp_time > random.randint(60, 180) and not client.stopped:
+            # EXP: 80-200s
+            if now - exp_time > random.randint(80, 200) and not client.stopped:
                 owoexp()
                 exp_time = now
 
-            # Sleep mode giữ nguyên
+            # Weapons: Đẩy vào queue thay vì gọi trực tiếp
+            if client.wm == "YES" and not client.stopped:
+                if cycles_since_last_weapon >= max_cycles_before_weapon:
+                    # Đợi thêm một khoảng thời gian an toàn
+                    time_since_last_cmd = now - last_global_cmd_time
+                    if time_since_last_cmd > 20:  # Chỉ thêm vào queue nếu đã rảnh 20s
+                        weapon_queue.put("buy_crate")
+                        cycles_since_last_weapon = 0
+                        max_cycles_before_weapon = random.randint(2, 4)
+                        logger.info(f"Added weapon buy to queue. Next in {max_cycles_before_weapon} cycles")
+                    
+            # Sleep mode
             if client.sm == "YES" and not client.stopped:
                 if now - main > random.randint(300, 1000):
                     main = now
-                    logger.info("Entering sleep mode")
                     ui.slowPrinting(f"{at()}{color.okblue} [INFO]{color.reset} Sleeping")
                     sleep(random.randint(100, 500))
 
-            # Stop Mode giữ nguyên
+            # Stop mode
             if client.stop and client.stop.isdigit() and not client.stopped:
                 if now - stop > int(client.stop):
                     logger.info(f"Stopping bot after {client.stop} seconds")
                     bot.gateway.close()
 
-            # Sell giữ nguyên
+            # Sell
             if client.sell['enable'] == "YES" and not client.stopped:
                 if not hasattr(client, 'next_sell_time'):
                     client.next_sell_time = now + random.randint(1800, 3600) + random.randint(-120, 120)
@@ -701,22 +743,12 @@ def loopie() -> None:
                     sell()
                     client.next_sell_time = now + random.randint(1800, 3600) + random.randint(-120, 120)
 
-            # Gems giữ nguyên
+            # Gems
             if client.gm == "YES" and not client.stopped:
                 if now - gems_check > 300:
                     Gems.detect()
                     gems_check = now
-
-            # Weapons: mua crate (chỉ sau khi đạt đủ số chu kỳ)
-            if client.wm == "YES" and not client.stopped:
-                if cycles_since_last_weapon >= max_cycles_before_weapon:
-                    if now - weapons_check > 5:
-                        Weapons.buy_one_crate()
-                        weapons_check = now
-                        cycles_since_last_weapon = 0  # Reset cycle
-                        # Random cycle mới cho lần tiếp theo
-                        max_cycles_before_weapon = random.randint(1, 2)
-                        
+                    
         except Exception as e:
             logger.error(f"Error in loopie: {str(e)}")
             trigger_alert("!!! RUNTIME ERROR !!!")
