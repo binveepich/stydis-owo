@@ -2,10 +2,10 @@
     "token": "",
     "channel": "",
     "gm": "YES",
-    "wm": "YES",  
-    "sm": "YES",  
-    "pm": "YES", 
-    "em": {     
+    "wm": "YES",
+    "sm": "YES",
+    "pm": "YES",
+    "em": {
         "text": "YES",
         "owo": "YES"
     },
@@ -13,15 +13,22 @@
         "link": null,
         "ping": null
     },
-    "sbcommands": {
-        "enable": "NO",
-        "prefix": ".",
-        "allowedid": null
-    },
     "daily": "YES",
     "stop": "22222",
     "sell": {
         "enable": "YES",
         "types": "all"
+    },
+    "captcha": {
+        "enabled": true,
+        "api_key": "",
+        "service": "2captcha",
+        "enable_image": true,
+        "model_path": "captcha_resolver/models/best.onnx"
+    },
+    "cpu": {
+        "max_percent": 90.0,
+        "check_interval": 1.0,
+        "max_wait_time": 111.0
     }
 }
