@@ -1,26 +1,26 @@
 {
     "token": "",
     "channel": "",
-    "gm": "YES",
-    "wm": "YES",
-    "sm": "YES",
-    "pm": "YES",
+    "gm": "NO",
+    "wm": "NO",
+    "sm": "NO",
+    "pm": "NO",
     "em": {
-        "text": "YES",
-        "owo": "YES"
+        "text": "NO",
+        "owo": "NO"
     },
     "webhook": {
         "link": null,
         "ping": null
     },
-    "daily": "YES",
+    "daily": "NO",
     "stop": "22222",
     "sell": {
-        "enable": "YES",
+        "enable": "NO",
         "types": "all"
     },
     "captcha": {
-        "enabled": true,
+        "enabled": false,
         "api_key": "",
         "service": "2captcha",
         "enable_image": true,
