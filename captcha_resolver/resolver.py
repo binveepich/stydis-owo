@@ -20,12 +20,6 @@ class CaptchaResolver:
         self.retry_count = 0
         self._is_running = False
         
-        # Status file path
-        self.status_file = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'data', 'captcha_status.json'
-        )
-        
         self._init_solvers()
         
         try:
@@ -48,7 +42,7 @@ class CaptchaResolver:
         api_key = config.get('api_key')
         if api_key:
             try:
-                service = config.get('service', 'yescaptcha')
+                service = config.get('service', '2captcha')
                 self.web_solver = WebSolver(
                     api_key=api_key,
                     service=service,
@@ -61,7 +55,6 @@ class CaptchaResolver:
         if config.get('enable_image', True):
             try:
                 model_path = config.get('model_path', 'best.onnx')
-                # Tim model trong cac thu muc
                 if not os.path.exists(model_path):
                     possible_paths = [
                         model_path,
@@ -84,37 +77,6 @@ class CaptchaResolver:
                     self._log("WARN", "Image solver not available (model not found)")
             except Exception as e:
                 self._log("ERROR", f"Failed to init image solver: {e}")
-
-    def _write_status(self, status: str, result: Optional[str] = None, retry: int = 0):
-        """Ghi trang thai vao file"""
-        try:
-            os.makedirs(os.path.dirname(self.status_file), exist_ok=True)
-            with open(self.status_file, 'w') as f:
-                json.dump({
-                    'status': status,
-                    'result': result,
-                    'retry': retry,
-                    'timestamp': time.time(),
-                    'max_retries': self.max_retries
-                }, f)
-        except Exception as e:
-            self._log("ERROR", f"Write status failed: {e}")
-
-    def _read_status(self) -> dict:
-        """Doc trang thai tu file"""
-        try:
-            with open(self.status_file, 'r') as f:
-                return json.load(f)
-        except:
-            return {'status': 'idle', 'result': None}
-
-    def _clear_status(self):
-        """Xoa file status"""
-        try:
-            if os.path.exists(self.status_file):
-                os.remove(self.status_file)
-        except:
-            pass
 
     async def _fetch_captcha_image(self) -> Optional[bytes]:
         try:
@@ -181,12 +143,11 @@ class CaptchaResolver:
             return False
 
     async def _solve_once(self) -> bool:
-        """Giai captcha 1 lan"""
         self._log("INFO", "=" * 50)
         self._log("INFO", f"Attempt {self.retry_count + 1}/{self.max_retries}")
         self._log("INFO", "=" * 50)
 
-        # Try web solver first
+        # Try web solver
         if self.web_solver:
             self._log("INFO", "[Web Solver]")
             
@@ -239,7 +200,6 @@ class CaptchaResolver:
         return False
 
     async def solve(self) -> bool:
-        """Giai captcha voi retry 3 lan"""
         if self._is_running:
             self._log("WARN", "Resolver already running")
             return False
@@ -254,13 +214,9 @@ class CaptchaResolver:
 
         try:
             while self.retry_count < self.max_retries:
-                self._write_status('solving', retry=self.retry_count)
-                
                 success = await self._solve_once()
                 
                 if success:
-                    self._write_status('success')
-                    self._clear_status()
                     self._log("SUCCESS", "=" * 50)
                     self._log("SUCCESS", "CAPTCHA SOLVED SUCCESSFULLY!")
                     self._log("SUCCESS", "=" * 50)
@@ -275,7 +231,6 @@ class CaptchaResolver:
                     await asyncio.sleep(wait_time)
                     self._log("INFO", "Retrying...")
 
-            self._write_status('failed')
             self._log("ERROR", "=" * 50)
             self._log("ERROR", f"ALL {self.max_retries} ATTEMPTS FAILED!")
             self._log("ERROR", "=" * 50)
@@ -284,7 +239,6 @@ class CaptchaResolver:
 
         except Exception as e:
             self._log("ERROR", f"Solve error: {e}")
-            self._write_status('failed')
             self._is_running = False
             return False
 
@@ -297,3 +251,120 @@ class CaptchaResolver:
     
     def is_running(self) -> bool:
         return self._is_running
+
+
+def run_resolver_standalone():
+    """Chay resolver nhu app doc lap - CHI GIAI CAPTCHA"""
+    from utils.colors import color
+    
+    print()
+    print("=" * 60)
+    print(f"{color.warning}CAPTCHA DETECTED!{color.reset}")
+    print(f"{color.okcyan}Starting captcha resolver...{color.reset}")
+    print("=" * 60)
+    print()
+    
+    # Load config tu settings.json
+    try:
+        config_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'settings.json'
+        )
+        
+        with open(config_path, 'r') as f:
+            config_data = json.load(f)
+        
+        # Tao mock config - CHI LAY THONG TIN CAN THIET CHO CAPTCHA
+        class MockConfig:
+            def __init__(self, data):
+                self.token = data.get('token', '')
+                self.channel = data.get('channel', '')
+                self.OwOID = data.get('OwOID', '')
+                self.captcha_config = data.get('captcha', {})
+                self.stopped = False
+            
+            def get_captcha_config(self):
+                return self.captcha_config
+            
+            def get(self, key, default=None):
+                return getattr(self, key, default)
+        
+        # Tao mock bot - CHI CO LOG VA CONFIG
+        class MockBot:
+            def __init__(self, config):
+                self.config = config
+                self.start_time = time.time()
+            
+            def log(self, level, msg):
+                from utils.colors import color
+                level_colors = {
+                    'INFO': color.okcyan,
+                    'SUCCESS': color.okgreen,
+                    'WARN': color.warning,
+                    'ERROR': color.fail,
+                }
+                color_code = level_colors.get(level, color.reset)
+                timestamp = time.strftime('%H:%M:%S')
+                print(f"{timestamp} {color_code}[{level}]{color.reset} {msg}")
+        
+        mock_config = MockConfig(config_data)
+        mock_bot = MockBot(mock_config)
+        
+        # Tao resolver
+        resolver = CaptchaResolver(mock_bot)
+        
+        if not resolver.is_available():
+            print(f"{color.fail}ERROR: No solver available!{color.reset}")
+            print("Please check your captcha configuration in settings.json")
+            input("Press ENTER to exit...")
+            return
+        
+        # Chay resolver
+        result = asyncio.run(resolver.solve())
+        
+        if result:
+            print()
+            print("=" * 60)
+            print(f"{color.okgreen}CAPTCHA SOLVED SUCCESSFULLY!{color.reset}")
+            print(f"{color.okcyan}Restarting main bot...{color.reset}")
+            print("=" * 60)
+            print()
+            
+            # Restart main bot
+            main_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                'main.py'
+            )
+            
+            if os.path.exists(main_path):
+                # Chay main moi va thoat resolver
+                os.execv(sys.executable, [sys.executable, main_path])
+            else:
+                print(f"{color.fail}ERROR: main.py not found!{color.reset}")
+                input("Press ENTER to exit...")
+        else:
+            print()
+            print("=" * 60)
+            print(f"{color.fail}CAPTCHA SOLVE FAILED AFTER 3 ATTEMPTS{color.reset}")
+            print(f"{color.okcyan}Press ENTER to exit, or Ctrl+C to force quit.{color.reset}")
+            print("=" * 60)
+            print()
+            
+            # Cho user nhan Enter de thoat
+            try:
+                input()
+            except:
+                pass
+            
+            print("Exiting...")
+            time.sleep(0.5)
+            sys.exit(1)
+        
+    except FileNotFoundError:
+        print(f"{color.fail}ERROR: settings.json not found!{color.reset}")
+        input("Press ENTER to exit...")
+    except Exception as e:
+        print(f"{color.fail}ERROR: {e}{color.reset}")
+        import traceback
+        traceback.print_exc()
+        input("Press ENTER to exit...")

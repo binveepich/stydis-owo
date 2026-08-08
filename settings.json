@@ -21,7 +21,7 @@
     },
     "captcha": {
         "enabled": true,
-        "api_key": "",
+        "api_key": "b3f9ec85d1be045883700a110521da5f",
         "service": "2captcha",
         "enable_image": true,
         "model_path": "captcha_resolver/models/best.onnx"

@@ -35,6 +35,10 @@ class OwOBot:
         self.gems = None
         self.weapons = None
 
+        self.last_command_id = None
+        self.last_command_time = 0
+        self.command_history = []
+
         cpu_config = config.get_cpu_config() if hasattr(config, 'get_cpu_config') else {}
         self.cpu_controller = CPUController(
             max_cpu_percent=cpu_config.get('max_percent', 90.0),

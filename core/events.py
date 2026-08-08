@@ -1,6 +1,10 @@
 import time
 import json
 import asyncio
+import sys
+import os
+import subprocess
+import ctypes
 from utils.helpers import UI
 from utils.colors import color
 
@@ -100,16 +104,28 @@ class EventHandler:
                 return
 
             result = self._issue_checker(m)
-            if result == "captcha" and not self.captcha_detected and not self._is_solving and not self._solving_lock:
+            if result == "captcha" and not self.captcha_detected and not self._solving_lock:
                 self.captcha_detected = True
                 self._handle_captcha()
+
+            if self.bot.gems and self.bot.config.gm == "YES":
+                content = m.get('content', '')
+                author = m.get('author', {})
+                author_id = author.get('id')
+
+                if author_id == self.bot.config.OwOID and content:
+                    if 'hunt is empowered by' in content.lower():
+                        self.bot.gems.check_and_use_gems_from_hunt(content)
+
+                    if 'already have an active' in content.lower() or 'you do not own this gem' in content.lower():
+                        self.bot.gems.handle_use_response(content)
 
         except Exception as e:
             pass
 
     def _handle_captcha(self):
         try:
-            if self._is_solving:
+            if self._solving_lock:
                 self.bot.log("INFO", "Captcha solve already in progress...")
                 return
 
@@ -118,157 +134,124 @@ class EventHandler:
                 self._pause_bot_no_resolver()
                 return
 
-            if self.bot.captcha_resolver.is_running():
-                self.bot.log("INFO", "Resolver already running...")
-                return
+            self.bot.log("DETECTED", "=" * 50)
+            self.bot.log("DETECTED", "CAPTCHA DETECTED!")
+            self.bot.log("DETECTED", "=" * 50)
 
-            self.bot.log("DETECTED", "CAPTCHA DETECTED! Pausing bot to solve...")
-            
-            # Pause bot
-            self._stop_bot_for_captcha()
+            self._trigger_alert()
 
-            # Start solving
-            self._is_solving = True
-            self._solving_lock = True
-            
-            if self._loop:
-                self._solve_task = self._loop.create_task(self._auto_solve_captcha())
-            else:
-                self._solve_task = asyncio.ensure_future(self._auto_solve_captcha())
-
-        except Exception as e:
-            self.bot.log("ERROR", f"Handle captcha error: {e}")
-            self._pause_bot_no_resolver()
-
-    def _stop_bot_for_captcha(self):
-        try:
-            self.bot.log("INFO", "Pausing bot for captcha solving...")
+            self.bot.log("INFO", "Stopping bot...")
 
             if self.bot.scheduler:
                 try:
-                    self.bot.log("INFO", "Stopping scheduler...")
                     self.bot.scheduler.stop()
-                except Exception as e:
-                    self.bot.log("WARN", f"Scheduler stop error: {e}")
+                except:
+                    pass
 
-            self.bot.config.stopped = True
-            self.bot.running = False
-
-            self.bot.log("INFO", "Bot paused. Gateway still connected. Starting captcha solve...")
-
-        except Exception as e:
-            self.bot.log("ERROR", f"Pause bot failed: {e}")
-
-    async def _auto_solve_captcha(self):
-        try:
-            self.bot.log("INFO", "=" * 50)
-            self.bot.log("INFO", "CAPTCHA RESOLVER STARTED")
-            self.bot.log("INFO", "=" * 50)
-
-            # Giai captcha voi retry 3 lan
-            success = await self.bot.captcha_resolver.solve()
-
-            if success:
-                self.bot.log("SUCCESS", "Captcha solved! Resuming bot...")
-                await self._resume_bot()
-            else:
-                self.bot.log("ERROR", "Auto-solve failed after 3 attempts. Waiting for user action...")
-                await self._wait_for_user_exit()
-
-        except asyncio.CancelledError:
-            self.bot.log("WARN", "Captcha solve was cancelled")
-            await self._wait_for_user_exit()
-        except Exception as e:
-            self.bot.log("ERROR", f"Captcha solve error: {e}")
-            await self._wait_for_user_exit()
-        finally:
-            self._is_solving = False
-            self._solving_lock = False
-            self._solve_task = None
-
-    async def _resume_bot(self):
-        try:
-            self.bot.log("INFO", "Resuming bot...")
-
-            self.captcha_detected = False
-            self.bot.config.stopped = False
-            self.bot.running = True
-
-            if self.bot.scheduler and not self.bot.scheduler.running:
-                self.bot.log("INFO", "Starting scheduler...")
-                self.bot.scheduler.start()
-
-            self.bot.log("SUCCESS", "Bot resumed successfully!")
-
-        except Exception as e:
-            self.bot.log("ERROR", f"Resume failed: {e}")
-            await self._wait_for_user_exit()
-
-    async def _wait_for_user_exit(self):
-        try:
-            self.bot.log("INFO", "Bot is paused. Gateway still connected.")
-            self.bot.log("INFO", "Press ENTER to exit the tool, or Ctrl+C to force quit.")
-
-            print()
-            print("=" * 60)
-            print(f"{color.warning}CAPTCHA SOLVE FAILED AFTER 3 ATTEMPTS{color.reset}")
-            print(f"{color.okcyan}Bot is paused. Gateway still connected.{color.reset}")
-            print(f"{color.okcyan}Press ENTER to exit the tool safely.{color.reset}")
-            print(f"{color.okcyan}Or press Ctrl+C to force quit.{color.reset}")
-            print("=" * 60)
-            print()
-
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, input)
-
-            self.bot.log("INFO", "User requested exit. Closing gateway...")
-            self._user_confirmed_exit = True
-            self._exit_tool()
-
-        except asyncio.CancelledError:
-            self.bot.log("WARN", "User cancelled with Ctrl+C")
-            self._exit_tool()
-        except Exception as e:
-            self.bot.log("ERROR", f"Wait for user exit error: {e}")
-            self._exit_tool()
-
-    def _exit_tool(self):
-        try:
             try:
                 self.bot.discord_bot.gateway.close()
             except:
                 pass
 
-            if self.bot.scheduler:
-                try:
-                    self.bot.scheduler.stop()
-                except:
-                    pass
+            self.bot.config.stopped = True
+            self.bot.running = False
 
-            self.bot.log("INFO", "Tool exited. Goodbye!")
+            self.bot.log("INFO", "Bot stopped. Starting resolver...")
 
-            import os
+            self._run_resolver_in_place()
+
+            self.bot.log("INFO", "Exiting main process...")
             time.sleep(0.5)
             os._exit(0)
 
         except Exception as e:
+            self.bot.log("ERROR", f"Handle captcha error: {e}")
+            self._pause_bot_no_resolver()
+
+    def _trigger_alert(self):
+        try:
             import os
-            os._exit(0)
+
+            if os.name == "nt":
+                user32 = ctypes.windll.user32
+                kernel32 = ctypes.windll.kernel32
+
+                hwnd = kernel32.GetConsoleWindow()
+                if hwnd:
+                    user32.FlashWindow(hwnd, True)
+
+                    screen_width = user32.GetSystemMetrics(0)
+                    screen_height = user32.GetSystemMetrics(1)
+
+                    rect = ctypes.wintypes.RECT()
+                    user32.GetWindowRect(hwnd, ctypes.byref(rect))
+
+                    win_width = rect.right - rect.left
+                    win_height = rect.bottom - rect.top
+
+                    x = int((screen_width - win_width) / 2)
+                    y = int((screen_height - win_height) / 2)
+
+                    user32.MoveWindow(hwnd, x, y, win_width, win_height, True)
+                    user32.SetForegroundWindow(hwnd)
+
+            print('\a')
+            print('\a')
+
+        except Exception as e:
+            pass
+
+    def _run_resolver_in_place(self):
+        try:
+            resolver_script = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                'captcha_resolver',
+                'resolver_runner.py'
+            )
+
+            if not os.path.exists(resolver_script):
+                self._create_resolver_runner(resolver_script)
+
+            self.bot.log("INFO", f"Starting resolver...")
+
+            os.execv(sys.executable, [sys.executable, resolver_script])
+
+        except Exception as e:
+            self.bot.log("ERROR", f"Failed to start resolver: {e}")
+
+    def _create_resolver_runner(self, path):
+        content = '''#!/usr/bin/env python3
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from captcha_resolver.resolver import run_resolver_standalone
+
+if __name__ == "__main__":
+    run_resolver_standalone()
+'''
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(content)
+        except Exception as e:
+            pass
 
     def _pause_bot_no_resolver(self):
         try:
             self.bot.config.stopped = True
             self.bot.running = False
-            
+
             if self.bot.scheduler:
                 try:
                     self.bot.scheduler.stop()
                 except:
                     pass
-            
+
             self.bot.log("INFO", "Bot paused due to captcha. Please restart tool to continue.")
             self.bot.log("INFO", "If you want to auto-solve captcha, configure API key in config.")
-            
+
             self.ui.slowPrinting(
                 f'{self.bot.at()}{color.warning} '
                 '!! [CAPTCHA DETECTED] !! Bot Paused'
@@ -281,7 +264,7 @@ class EventHandler:
                 f'{color.okcyan}[INFO]{color.reset} '
                 'Bot is paused. Press Ctrl+C to exit.'
             )
-            
+
         except Exception as e:
             self.bot.log("ERROR", f"Pause bot failed: {e}")
 

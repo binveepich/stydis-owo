@@ -1,5 +1,6 @@
 import time
 import random
+import threading
 from threading import Lock
 from utils.helpers import UI
 from utils.colors import color
@@ -14,6 +15,8 @@ class CommandExecutor:
         self.GLOBAL_DELAY = getattr(BotConstants, 'GLOBAL_CMD_DELAY', 5)
         self.CMD_COOLDOWN = getattr(BotConstants, 'CMD_COOLDOWN', {})
         self.last_cmd_time = {}
+        self.pending_commands = set()
+        self.command_timestamps = {}
 
     def send_command(self, cmd: str, extra_delay: bool = True) -> bool:
         if self.bot.config.stopped:
@@ -21,8 +24,12 @@ class CommandExecutor:
 
         with self.cmd_lock:
             now = time.time()
+            cmd_key = f"{cmd}_{int(now // 10)}"
 
             if self.bot.config.stopped:
+                return False
+
+            if cmd_key in self.pending_commands:
                 return False
 
             if now - self.last_global_cmd_time < self.GLOBAL_DELAY:
@@ -57,6 +64,8 @@ class CommandExecutor:
 
                 self.last_cmd_time[cmd] = now
                 self.last_global_cmd_time = now
+                self.pending_commands.add(cmd_key)
+                threading.Timer(10, lambda: self.pending_commands.discard(cmd_key)).start()
 
                 self.ui.slowPrinting(
                     f"{self.bot.at()}{color.okgreen} [SENT]{color.reset} {full_cmd}"

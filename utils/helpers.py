@@ -1,6 +1,7 @@
 import os
 import time
 import sys
+import random
 from utils.colors import color
 from utils.constants import BotConstants
 
@@ -17,7 +18,7 @@ class UI:
     @classmethod
     def slowPrinting(cls, text):
         for letter in text:
-            time.sleep(.002)
+            time.sleep(0.002)
             print(letter, end="", flush=True)
         print("")
     
@@ -45,7 +46,7 @@ def print_sent(cmd):
     print(f"{at()}{color.okgreen} [SENT]{color.reset} {cmd}")
 
 def print_info(msg):
-    print(f"{at()}{color.okcyan}[INFO]{color.reset} {msg}")
+    print(f"{at()}{color.okcyan} [INFO]{color.reset} {msg}")
 
 def print_warning(msg):
     print(f"{at()}{color.warning} [WARN]{color.reset} {msg}")
@@ -55,3 +56,28 @@ def print_error(msg):
 
 def print_success(msg):
     print(f"{at()}{color.okgreen} [SUCCESS]{color.reset} {msg}")
+
+def print_debug(msg):
+    print(f"{at()}{color.purple} [DEBUG]{color.reset} {msg}")
+
+def get_random_delay(min_seconds, max_seconds):
+    return random.uniform(min_seconds, max_seconds)
+
+def get_random_int_delay(min_seconds, max_seconds):
+    return random.randint(min_seconds, max_seconds)
+
+def format_time(seconds):
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    if h > 0:
+        return f"{h}h{m}m{s}s"
+    elif m > 0:
+        return f"{m}m{s}s"
+    else:
+        return f"{s}s"
+
+def truncate_text(text, max_length=100):
+    if len(text) <= max_length:
+        return text
+    return text[:max_length] + "..."

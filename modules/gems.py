@@ -1,27 +1,24 @@
 from time import sleep, time
 from re import findall
-from random import randint
+import random
 from utils.helpers import print_info, print_warning
+
 
 class GemModule:
     def __init__(self, bot, start_time):
         self.bot = bot
         self.start_time = start_time
-        self.last_inv = 0
-        self.last_use = 0
-        self.inv_cooldown = 15
-        self.use_cooldown = 10
-        self.last_used_gems = []
-        self.available = [1, 3, 4, 5]
-        self.gemtypes = [1, 3, 4, 5]
-        self.regex = r"gem(\d):\d+>`\[(\d+)"
-        self.owo_id = '408785106942164992'
-        self.last_detect_time = 0
-        self.detect_cooldown = 5
         
-        self.inv_cache = None
-        self.inv_cache_time = 0
-        self.inv_cache_ttl = randint(222, 777)
+        self.inv_cooldown = 333
+        self.use_cooldown = 10
+        self.last_inv_check = 0
+        self.last_use_time = 0
+        
+        self.last_used_gems = []
+        
+        self.owo_id = '408785106942164992'
+        
+        self.gem_priority = [5, 4, 3, 1]
         
         self.gem_mapping = {
             51: 1, 52: 1, 53: 1, 54: 1, 55: 1, 56: 1, 57: 1,
@@ -29,190 +26,235 @@ class GemModule:
             72: 4, 73: 4, 74: 4, 75: 4, 76: 4, 77: 4, 78: 4,
             79: 5, 80: 5, 81: 5, 82: 5, 83: 5, 84: 5, 85: 5,
         }
-
+        
+        self.regex = r"gem(\d):\d+>`\[(\d+)"
+        
+        self.first_check_done = False
+        self.initialized = False
+        self.has_active_gems = False
+        
+        self.use_failures = 0
+        self.max_failures = 3
+        self._last_items_check = 0
+        
     def setup(self, bot):
         if bot.config.gm == "YES":
             bot.scheduler.register_task(
                 name="gem",
-                func=self.detect,
-                min_interval=60,
-                max_interval=120,
+                func=self.gem_cycle,
+                min_interval=15,
+                max_interval=15,
                 priority=6
             )
+            if not self.initialized:
+                self.initialized = True
+                print_info("Gem module initialized")
 
-    def _get_inventory(self, force=False):
-        now = time()
-        
-        if not force and self.inv_cache and (now - self.inv_cache_time < self.inv_cache_ttl):
-            return self.inv_cache
-        
-        self.bot.executor.send_command("inv")
-        sleep(3)
-        
+    def gem_cycle(self):
+        if self.bot is None or self.bot.config.stopped:
+            return
+
+        try:
+            hunt_msg = self._get_hunt_message()
+            
+            is_empowered = False
+            active_tiers = []
+            
+            if hunt_msg:
+                if "**🌱" in hunt_msg and "hunt is empowered by" in hunt_msg.lower():
+                    is_empowered = True
+                    gems_in_use = self._parse_hunt_gems_from_message(hunt_msg)
+                    active_tiers = [int(gem[0]) for gem in gems_in_use] if gems_in_use else []
+                    self.has_active_gems = True
+                    self.use_failures = 0
+                else:
+                    self.has_active_gems = False
+            
+            needed_tiers = list(self.gem_priority)
+            
+            if self.has_active_gems and active_tiers:
+                for tier in active_tiers:
+                    if tier in needed_tiers:
+                        needed_tiers.remove(tier)
+            elif not self.has_active_gems:
+                needed_tiers = list(self.gem_priority)
+            
+            if needed_tiers:
+                gems_used = self._check_and_use_gems(needed_tiers)
+                if gems_used:
+                    return
+            
+            if self.has_active_gems or not needed_tiers:
+                self._handle_items_if_needed()
+                
+        except Exception as e:
+            print_warning(f"Gem error: {str(e)[:50]}")
+
+    def _get_hunt_message(self):
         msgs = self.bot.getMessages(num=10, channel=self.bot.config.channel)
         if not msgs:
-            return None, None
+            return None
+            
+        for msg in msgs:
+            if msg.get('author', {}).get('id') == self.owo_id:
+                content = msg.get('content', '')
+                if 'spent 5' in content and 'caught a' in content:
+                    return content
+                if 'hunt is empowered by' in content.lower():
+                    return content
+        return None
+
+    def _parse_hunt_gems_from_message(self, content):
+        if not content:
+            return []
+        return findall(self.regex, content)
+
+    def _check_and_use_gems(self, needed_tiers):
+        now = time()
         
+        if self.use_failures >= self.max_failures:
+            if now - self.last_inv_check < 600:
+                return False
+            self.use_failures = 0
+        
+        if not self.first_check_done:
+            self.first_check_done = True
+            print_info("Initial gems check...")
+        elif now - self.last_inv_check < self.inv_cooldown:
+            return False
+            
+        self.last_inv_check = now
+        
+        self.bot.executor.send_command("inv", extra_delay=True)
+        sleep(random.uniform(2, 4))
+
+        if self.bot.config.stopped:
+            return False
+
+        msgs = self.bot.getMessages(num=10, channel=self.bot.config.channel)
+        if not msgs:
+            return False
+
         inv_content = None
         for msg in msgs:
-            if msg['author']['id'] == self.owo_id and 'Inventory' in msg['content']:
+            if (msg.get('author', {}).get('id') == self.owo_id and
+                'Inventory' in msg.get('content', '')):
                 inv_content = msg['content']
                 break
-        
+
         if not inv_content:
-            return None, None
-        
+            return False
+
         inv_items = findall(r'`(.*?)`', inv_content)
+
+        gems_by_tier = {1: [], 3: [], 4: [], 5: []}
         
-        if '050' in inv_items:
-            self.bot.executor.send_command("lb all")
-            sleep(5)
-            result = (list(self.gemtypes), {})
-            self.inv_cache = result
-            self.inv_cache_time = now
-            self.inv_cache_ttl = randint(222, 777)
-            return result
-        
-        if '049' in inv_items:
-            self.bot.executor.send_command("lb f all")
-            sleep(5)
-            result = (list(self.gemtypes), {})
-            self.inv_cache = result
-            self.inv_cache_time = now
-            self.inv_cache_ttl = randint(222, 777)
-            return result
-        
-        if '100' in inv_items:
-            self.bot.executor.send_command("crate all")
-            sleep(5)
-        
-        if '028' in inv_items:
-            sleep(3)
-            self.bot.executor.send_command("use 28")
-            result = (list(self.gemtypes), {})
-            self.inv_cache = result
-            self.inv_cache_time = now
-            self.inv_cache_ttl = randint(222, 777)
-            return result
-        
-        gem_codes = []
         for item in inv_items:
             if item.isdigit():
                 code = int(item)
                 if 50 < code < 100:
-                    gem_codes.append(code)
-        
-        available_tiers = []
-        tier_codes = {1: [], 3: [], 4: [], 5: []}
-        
-        for code in gem_codes:
-            if code in self.gem_mapping:
-                tier = self.gem_mapping[code]
-                if tier not in available_tiers:
-                    available_tiers.append(tier)
-                tier_codes[tier].append(code)
-        
-        for tier in tier_codes:
-            tier_codes[tier].sort(reverse=True)
-        
-        result = (available_tiers, tier_codes)
-        
-        self.inv_cache = result
-        self.inv_cache_time = now
-        self.inv_cache_ttl = randint(222, 777)
-        
-        print_info(f"Inventory refreshed (next check in {self.inv_cache_ttl}s)")
-        
-        return result
+                    tier = self.gem_mapping.get(code)
+                    if tier and tier in needed_tiers:
+                        gems_by_tier[tier].append(code)
 
-    def useGems(self, gemslist=None, tier_codes=None):
-        if gemslist is None:
-            gemslist = [1, 3, 4, 5]
-        
-        if self.bot is None or self.bot.config.stopped:
-            return
-        
-        if time() - self.last_inv < self.inv_cooldown:
-            return
-        
-        self.last_inv = time()
-        
-        if tier_codes is None:
-            available_tiers, tier_codes = self._get_inventory()
-            if available_tiers is None:
-                return
-            self.available = available_tiers
-        else:
-            self.available = [tier for tier in tier_codes if tier_codes[tier]]
-        
-        use = []
-        for tier in gemslist:
-            if tier in tier_codes and tier_codes[tier]:
-                codes = tier_codes[tier]
-                if codes:
-                    best_code = codes[0]
-                    use.append(str(best_code))
-        
-        if not use:
-            return
-        
-        if time() - self.last_use < self.use_cooldown:
-            return
-        
-        if use == self.last_used_gems:
-            return
-        
-        self.last_used_gems = use.copy()
-        self.last_use = time()
-        
-        sleep(5)
-        self.bot.executor.send_command("use " + ' '.join(use))
-        print_info(f"Used gems: {' '.join(use)}")
+        gems_to_use = []
+        for tier in needed_tiers:
+            if gems_by_tier[tier]:
+                best_gem = max(gems_by_tier[tier])
+                gems_to_use.append(str(best_gem))
 
-    def detect(self):
-        if self.bot is None or self.bot.config.stopped:
-            return
+        if not gems_to_use:
+            return False
+
+        if gems_to_use == self.last_used_gems:
+            return False
+
+        if time() - self.last_use_time < self.use_cooldown:
+            return False
+
+        print_info(f"Gems to use: {' '.join(gems_to_use)}")
         
-        if time() - self.last_detect_time < self.detect_cooldown:
-            return
+        self.bot.executor.send_command(f"use {' '.join(gems_to_use)}", extra_delay=True)
+        sleep(random.uniform(2, 4))
+
+        msgs = self.bot.getMessages(num=5, channel=self.bot.config.channel)
+        use_success = False
         
-        self.last_detect_time = time()
+        for msg in msgs:
+            if msg.get('author', {}).get('id') == self.owo_id:
+                content = msg.get('content', '').lower()
+                if 'you do not own this gem' in content or 'already have an active' in content:
+                    self.use_failures += 1
+                    print_warning(f"Gem use failed ({self.use_failures}/{self.max_failures})")
+                    return False
+                if 'equipped' in content or 'active' in content:
+                    use_success = True
+                    self.use_failures = 0
+                    break
+
+        if use_success:
+            self.last_used_gems = gems_to_use.copy()
+            self.last_use_time = time()
+            self.has_active_gems = True
+            return True
+        
+        return False
+
+    def _handle_items_if_needed(self):
+        now = time()
+        
+        if now - self._last_items_check < 60:
+            return
+            
+        self._last_items_check = now
         
         msgs = self.bot.getMessages(num=10, channel=self.bot.config.channel)
         if not msgs:
             return
-        
-        target = None
+
+        inv_content = None
         for msg in msgs:
-            if msg['author']['id'] == self.owo_id and "**🌱" in msg['content']:
-                target = msg
+            if (msg.get('author', {}).get('id') == self.owo_id and
+                'Inventory' in msg.get('content', '')):
+                inv_content = msg['content']
                 break
-        
-        if not target:
+
+        if not inv_content:
             return
+
+        inv_items = findall(r'`(.*?)`', inv_content)
         
-        gems = findall(self.regex, target['content'])
-        used_tiers = []
-        for gem in gems:
-            used_tiers.append(int(gem[0]))
-        
-        if not used_tiers:
-            print_info("Hunt detected: no gems used")
+        if '050' in inv_items:
+            print_info("Found Lootbox(es)...")
+            self.bot.executor.send_command("lb all", extra_delay=True)
+            sleep(5)
             return
-        
-        all_tiers = [1, 3, 4, 5]
-        missing_tiers = [t for t in all_tiers if t not in used_tiers]
-        
-        if not missing_tiers:
+            
+        if '049' in inv_items:
+            print_info("Found Fabled Lootbox(es)...")
+            self.bot.executor.send_command("lb f all", extra_delay=True)
+            sleep(5)
             return
-        
-        available_tiers, tier_codes = self._get_inventory()
-        if available_tiers is None:
+            
+        if '100' in inv_items:
+            print_info("Found Crate(s)...")
+            self.bot.executor.send_command("crate all", extra_delay=True)
+            sleep(5)
             return
-        
-        usable_tiers = [t for t in missing_tiers if t in available_tiers and tier_codes.get(t, [])]
-        
-        if not usable_tiers:
+            
+        if '028' in inv_items:
+            print_info("Found Lucky Box(es)...")
+            sleep(3)
+            self.bot.executor.send_command("use 28", extra_delay=True)
+            sleep(5)
             return
-        
-        self.useGems(usable_tiers, tier_codes)
+
+    def reset(self):
+        self.last_inv_check = 0
+        self.last_use_time = 0
+        self.last_used_gems = []
+        self.first_check_done = False
+        self.has_active_gems = False
+        self.use_failures = 0
+        self._last_items_check = 0
+        print_info("Gem module reset")
