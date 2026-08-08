@@ -43,14 +43,14 @@ class Scheduler:
             self.is_sleeping = False
             return
 
-        active_duration = random.randint(600, 900)
-        break_duration = random.randint(333, 666)
+        active_duration = random.randint(333, 999)
+        break_duration = random.randint(444, 1111)
 
         self.active_until = time.time() + active_duration
         self.sleep_until = self.active_until + break_duration
 
         self.ui.slowPrinting(
-            f"{self.bot.at()}{color.okblue} [INFO]{color.reset} "
+            f"{self.bot.at()}{color.okblue} [INFO] {color.reset} "
             f"Schedule: Active {active_duration}s, Break {break_duration}s"
         )
 
